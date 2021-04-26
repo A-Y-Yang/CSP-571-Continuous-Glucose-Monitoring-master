@@ -1,0 +1,490 @@
+---
+title: "ARIMA 2"
+author: "Annie Yang"
+date: "10/10/2020"
+output: 
+  html_notebook:
+    toc: yes
+    toc_float: yes
+---
+
+# 1.0 Libraries
+
+```{r, warning=FALSE}
+# Core Tidyverse
+library(tidyverse)
+library(glue)
+library(forcats)
+
+# Time Series
+library(timetk)
+library(tidyquant)
+library(tibbletime)
+
+# Visualization
+library(cowplot)
+
+# Preprocessing
+library(recipes)
+
+# Sampling / Accuracy
+library(rsample)
+library(yardstick) 
+
+# Modeling
+library(keras)
+```
+
+# 2.0 Data
+
+```{r, warning=FALSE}
+df <-  read.csv("D:/IIT-master/CS-571-Data Preparation & Analysis-master/project/diabetes_ds/sample_dat.csv", sep=",", header=T, stringsAsFactors = T)
+
+value <- df$IMPUTED
+
+db.date <- paste0(df$YEAR,'-',df$MONTH,'-',df$DAY)
+db.time <- paste0(df$HOUR,':',df$MIN,':',df$SEC)
+
+
+cgm_data <- data.frame(value)
+cgm_data$index <-as.POSIXct(paste(db.date, db.time), format="%Y-%m-%d %H:%M:%S")
+
+#Re-ordered
+cgm_data <- cgm_data[colnames(cgm_data)[c(2, 1)]]
+
+cgm_data <- as_tbl_time(cgm_data, index = index)
+
+
+cgm_data
+```
+
+# 3.0 Exploratory Data Analysis
+
+# 3.1 Visualizing Sunspot Data With Cowplot
+```{r, fig.width=16, warning=FALSE, echo=FALSE, fig.height=12}
+p1 <- cgm_data %>%
+    filter_time("2019-08-01 00:00" ~ "2019-08-31 00:00") %>%
+    ggplot(aes(index, value)) +
+    geom_point(color = palette_light()[[1]], alpha = 5, size=1) +
+    theme_tq() +
+    labs(
+        title = "From Aug 1st to Aug 31st"
+    )
+p2 <- cgm_data %>%
+    filter_time("2019-08-05 00:00" ~ "2019-08-9 00:00") %>%
+    ggplot(aes(index, value)) +
+    geom_line(color = palette_light()[[1]], alpha = 0.5) +
+    geom_point(color = palette_light()[[1]]) +
+    geom_smooth(method = "loess", span = 0.2, se = FALSE) +
+    theme_tq() +
+    labs(
+        title = "From Aug 5 to Aug 9nd (4 days data)"
+    )
+
+p_title <- ggdraw() + 
+    draw_label("CGM dataset 2019", size = 18, fontface = "bold", colour = palette_light()[[1]])
+plot_grid(p_title, p1, p2, ncol = 1, rel_heights = c(0.1, 1, 1))
+```
+
+
+```{r, warning=FALSE, echo=FALSE}
+
+cgm <- cgm_data %>%
+    filter_time("2019-08-05 00:00" ~ "2019-08-09 00:00")
+
+periods_train <- 48 # 1 week
+periods_test  <- 8 # 2 hours
+skip_span     <- 56
+
+rolling_origin_resamples <- rolling_origin(
+    cgm,
+    initial    = periods_train,
+    assess     = periods_test,
+    cumulative = FALSE,
+    skip       = skip_span
+)
+
+rolling_origin_resamples
+```
+```{r}
+# Plotting function for a single split
+plot_split <- function(split, expand_y_axis = TRUE, alpha = 1, size = 1, base_size = 14) {
+    
+    # Manipulate data
+    train_tbl <- training(split) %>%
+        add_column(key = "training") 
+    
+    test_tbl  <- testing(split) %>%
+        add_column(key = "testing") 
+    
+    data_manipulated <- bind_rows(train_tbl, test_tbl) %>%
+        as_tbl_time(index = index) %>%
+        mutate(key = fct_relevel(key, "training", "testing"))
+    
+    # Collect attributes
+    train_time_summary <- train_tbl %>%
+        tk_index() %>%
+        tk_get_timeseries_summary()
+    
+    test_time_summary <- test_tbl %>%
+        tk_index() %>%
+        tk_get_timeseries_summary()
+    
+    # Visualize
+    g <- data_manipulated %>%
+        ggplot(aes(x = index, y = value, color = key)) +
+        geom_line(size = size, alpha = alpha) +
+        theme_tq(base_size = base_size) +
+        scale_color_tq() +
+        labs(
+            title    = glue("Split: {split$id}"),
+            subtitle = glue("{train_time_summary$start} to {test_time_summary$end}"),
+            y = "", x = ""
+        ) +
+        theme(legend.position = "none") 
+    
+    
+    
+    return(g)
+}
+```
+
+```{r, warning=FALSE}
+rolling_origin_resamples$splits[[20]] %>%
+    plot_split() +
+    theme(legend.position = "bottom")
+```
+
+```{r}
+# Plotting function that scales to all splits 
+plot_sampling_plan <- function(sampling_tbl, expand_y_axis = TRUE, 
+                               ncol = 4, alpha = 1, size = 1, base_size = 14, 
+                               title = "Sampling Plan") {
+    
+    # Map plot_split() to sampling_tbl
+    sampling_tbl_with_plots <- sampling_tbl %>%
+        mutate(gg_plots = map(splits, plot_split, 
+                              expand_y_axis = expand_y_axis,
+                              alpha = alpha, base_size = base_size))
+    
+    # Make plots with cowplot
+    plot_list <- sampling_tbl_with_plots$gg_plots 
+    
+    p_temp <- plot_list[[1]] + theme(legend.position = "bottom")
+    legend <- get_legend(p_temp)
+    
+    p_body  <- plot_grid(plotlist = plot_list, ncol = ncol)
+    
+    p_title <- ggdraw() + 
+        draw_label(title, size = 18, fontface = "bold", colour = palette_light()[[1]])
+    
+    g <- plot_grid(p_title, p_body, legend, ncol = 1, rel_heights = c(0.05, 1, 0.05))
+    
+    return(g)
+    
+}
+```
+
+
+```{r, fig.width=16, fig.height=10}
+rolling_origin_resamples %>%
+    plot_sampling_plan(expand_y_axis = T, ncol = 10, alpha = 1, size = 1, base_size = 10, 
+                       title = "Plot of Train/Test Splits")
+```
+
+```{r}
+set <- list()
+
+for (i in 1:20) {
+  split    <- rolling_origin_resamples$splits[[i]]
+  split_id <- rolling_origin_resamples$id[[i]]
+  
+  df_trn <- training(split)
+  df_tst <- testing(split)
+ 
+  set[[i]] <- bind_rows(
+    df_trn %>% add_column(key = "training"),
+    df_tst %>% add_column(key = "testing")
+    ) %>%
+    as_tbl_time(index = index)
+}
+```
+
+```{r, fig.width=12, fig.height=24, warning=FALSE}
+library(tseries)
+library(forecast)
+
+ts_trn <- list()
+ts_tes <- list()
+
+for (i in 1:20) {
+  #split train/test
+  ts <- ts(set[[i]]$value)
+  ts_trn[[i]] <- head(ts, n=48)
+  h <- length(ts) - length(ts_trn[[i]])
+  ts_tes[[i]] <- tail(ts, h)
+}
+
+```
+
+
+Dicky-Fuller Test
+```{r}
+library(tseries)
+ts <- ts_trn[[20]]
+adf.test(ts)
+adf.test(diff(ts, lag=1))
+adf.test(diff(ts, lag=2))
+adf.test(diff(ts, lag=3))
+adf.test(diff(ts, lag=4))
+adf.test(diff(ts, lag=5))
+```
+
+```{r}
+#kpss.test(ts, null = c("Level", "Trend"), lshort = TRUE)
+kpss.test(ts, null = c("Level", "Trend"), lshort = TRUE)
+kpss.test(diff(ts, lag=1), null = c("Level", "Trend"), lshort = TRUE)
+kpss.test(diff(ts, lag=2), null = c("Level", "Trend"), lshort = TRUE)
+kpss.test(diff(ts, lag=3), null = c("Level", "Trend"), lshort = TRUE)
+kpss.test(diff(ts, lag=4), null = c("Level", "Trend"), lshort = TRUE)
+kpss.test(diff(ts, lag=5), null = c("Level", "Trend"), lshort = TRUE)
+```
+```{r}
+Box.test(ts, type="Ljung-Box", lag=1)
+Box.test(diff(ts, lag=1), type="Ljung-Box", lag=1)
+Box.test(diff(ts, lag=2), type="Ljung-Box", lag=1)
+Box.test(diff(ts, lag=3), type="Ljung-Box", lag=1)
+```
+ACF/PACF
+```{r, fig.width=12, fig.height=4}
+for (i in 20) {
+  
+  diiff.ts = diff(ts_trn[[i]], lag=1)
+  
+  par(mfrow=c(1, 2))
+  
+  pacf(diiff.ts,lag=20)
+  acf(diiff.ts,lag=50)
+  
+  #adf.test(ts)
+}
+
+```
+# Our PACF slowly tapers to 0, although it has two spikes at lags 1 and 2. On the other side, our ACF shows a tapering pattern, with lags slowly degrading towards 0. The table below can be used to help identify patterns, and what model conclusions we can make about those patterns. 
+# Since the ACF plot apers to 0 in some fashion and the PACF pattern has non-zero values at first p points; then lead to zero values elsewhere, we can conclude it as a AR(p) Model.
+```
+decompose(diiff.ts)
+```
+
+```{r}
+arimaModel=arima(ts_trn[[20]], order=c(3, 1, 0))
+print(arimaModel)
+```
+
+```{r}
+plot(arimaModel)
+```
+
+```{r}
+qqnorm(arimaModel$residuals, main = "Normal Q-Q Plot")
+```
+
+```{r}
+fores=forecast(arimaModel, level = c(95), length(ts_tes[[20]]))
+print(fores)
+```
+
+```{r}
+#pre.fores=predict(arimaModel, level = c(95), length(ts_tes[[20]]))
+print(pre.fores)
+length(ts_tes[[20]])
+```
+
+```{r}
+#library(ggfortify)
+#res <- rbind(ts_tes[[20]], fores$fitted)
+autoplot(fores, predict.colour = 'red1', ts.colour = 'gray23',predict.linetype = 'dashed', size=1, predict.size = 1.1) 
+```
+
+```
+library(ggfortify)
+autoplot(fores, predict.colour = 'red1', ts.colour = 'gray23',predict.linetype = 'dashed', size=1, predict.size = 1.1) 
+```
+
+```{r}
+getPerformance = function(pred, val) {
+    res = pred - val
+    MAE = sum(abs(res))/length(val)
+    RSS = sum(res^2)
+    MSE = RSS/length(val)
+    RMSE = sqrt(MSE)
+    perf = data.frame(MAE, RSS, MSE, RMSE)
+}
+
+library(DMwR)
+#length(fores$fitted)
+
+#accmeasures=regr.eval(ts_tes[[1]], fores$fitted)
+#accmeasures
+
+my.accmeasures=getPerformance((ts_tes[[20]]), matrix(tail(fores$fitted,n=length(ts_tes[[20]]))))
+my.accmeasures
+
+```
+
+
+```{r}
+AutoArimaMod = auto.arima(ts_trn[[20]])
+print(AutoArimaMod)
+```
+```{r}
+qqnorm(AutoArimaMod$residuals, main = "Normal Q-Q Plot")
+```
+
+```{r}
+auto.fores=forecast(AutoArimaMod, level = c(95), length(ts_tes[[20]]))
+print(auto.fores)
+```
+
+```{r}
+library(ggfortify)
+
+autoplot(auto.fores, predict.colour = 'red1', ts.colour = 'gray23',predict.linetype = 'dashed', size=1, predict.size = 1.1) 
+```
+
+```{r}
+auto.accmeasures=getPerformance((ts_tes[[20]]), matrix(tail(auto.fores$fitted,n=length(ts_tes[[20]]))))
+auto.accmeasures
+```
+
+```{r}
+arima_model <- list()
+for (i in 1:20) {
+  ts <- ts_trn[[i]]
+  
+  arima_model[[i]] = auto.arima(ts)
+  
+  #show(model[[i]])
+}
+```
+
+```{r}
+arima_model[[20]]
+```
+
+```{r, warning=FALSE}
+library(ggfortify)
+
+preds <- list()
+res <- list()
+
+for (i in 1:20) {
+  ts <- ts_tes[[i]]
+  
+  preds[[i]] <- forecast(arima_model[[i]], level = c(95), length(ts))
+  
+  res[[i]] <- preds[[i]]$fitted
+  
+  #res_plot <- rbind(ts, res[[i]])
+  #res_plts[i] <- autoplot(preds[[i]], predict.colour = 'red1', ts.colour = 'gray23',predict.linetype = 'dashed', size=1, predict.size = 1.1)
+}
+```
+
+```{r,fig.width=12}
+# Plotting function to all splits 
+plot_resulting_plan <- function(preds,
+                               ncol = 10, alpha = 1, size = 1, base_size = 14,
+                               predict.colour = 'red1', ts.colour = 'gray23',predict.linetype = 'dashed', predict.size = 1.1,
+                               title = "Forecast Result plots") {
+    
+    # Map plot_split() to sampling_tbl
+    gg_plots <- map(preds, autoplot, predict.colour = predict.colour, ts.colour = ts.colour,predict.linetype = predict.linetype, size=size, predict.size = predict.size)
+    
+    # Make plots with cowplot
+    plot_list <- gg_plots 
+    
+    p_temp <- plot_list[[1]] + theme(legend.position = "bottom")
+    legend <- get_legend(p_temp)
+    
+    p_body  <- plot_grid(plotlist = plot_list, ncol = ncol)
+    
+    p_title <- ggdraw() + 
+        draw_label(title, size = 18, fontface = "bold", colour = palette_light()[[1]])
+    
+    g <- plot_grid(p_title, p_body, legend, ncol = 1, rel_heights = c(0.05, 1, 0.05))
+    
+    return(g)
+    
+}
+```
+
+
+```{r, fig.width=16, fig.height=10}
+plot_resulting_plan(preds=preds, title = "Forecast Result plots", alpha = 0.1)
+```
+
+```{r}
+getPerformance = function(pred, val) {
+    res = pred - val
+    MAE = sum(abs(res))/length(val)
+    RSS = sum(res^2)
+    MSE = RSS/length(val)
+    RMSE = sqrt(MSE)
+    perf = data.frame(MAE, RSS, MSE, RMSE)
+}
+```
+
+
+```{r}
+res_perf <- list()
+for (i in 1:length(preds)) {
+  res_perf[[i]] <- getPerformance(matrix(ts_tes[[i]]), matrix(tail(res[[i]], n=length(ts_tes[[i]]))))
+}
+```
+
+```{r}
+res_perf
+```
+
+```{r}
+mae.val = 0
+rss.val = 0
+mse.val = 0
+rmse.val = 0
+
+for (i in 1:20) {
+  mae.val = mae.val+res_perf[[i]][,1]
+  rss.val = rss.val+res_perf[[i]][,2]
+  mse.val = mse.val+res_perf[[i]][,3]
+  rmse.val = rmse.val+res_perf[[i]][,4]
+}
+mae.val
+rss.val
+mse.val
+rmse.val
+avg.perf = data.frame(mae.val/20, rss.val/20, mse.val/20, rmse.val/20)
+show(avg.perf)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

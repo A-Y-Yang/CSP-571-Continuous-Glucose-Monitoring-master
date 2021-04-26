@@ -1,0 +1,331 @@
+---
+title: "Multivariate LSTM with xts package"
+output: html_notebook
+author: Emily Tao
+---
+
+Load saved dataframe
+
+```{r}
+#load("diabetes_mvar_denoised.Rda")
+#load("diabetes_mvar_imputed.Rda")
+load("diabetes_mvar_imputed_complete.Rda")
+
+usecols=c('cgm',
+          'bolus',
+          'basal',
+          'distance_value',
+          'activity_duration',
+          'activity_names_1',
+          'activity_names_11',
+          'insulin_onboard')
+date_time=diabetes.df$date_time
+diabetes.df=diabetes.df[,usecols]
+```
+
+Create xts object
+
+```{r}
+library(xts)
+diabetes.xts=xts(diabetes.df,order.by=date_time)
+head(diabetes.xts)
+```
+plotting
+```{r}
+plot(diabetes.xts['2019-05-21/2019-05-22'],major.ticks='days',minor.ticks='hours',main=NULL,ylim=c(0,20))
+```
+
+Diff the cgm values
+```{r}
+usedif=T
+diabetes.dif=diabetes.xts
+
+if (usedif)
+{
+  cgm.diff = diff(diabetes.xts[,'cgm'],differences=1,na.pad=T)
+  diabetes.dif[,'cgm'] = cgm.diff
+}
+```
+
+Set the time window (Exclude NA sections) - old method, ignore
+```{r}
+#window=window[1:(8000+13)]
+#diabetes.win = diabetes.dif['2019-05-21/2019-06-13']
+#diabetes.win.nodif = diabetes.xts['2019-05-21/2019-06-13']
+#which(is.na(diabetes.win[,'cgm'])) #check NA values
+```
+
+Rescaling/normalization functions
+```{r}
+#function 'NORMALIZE':
+#   take x=data, params=c(newmean,newsd)
+#   return rescaled_x, c(originalmean,originalsd)
+normalize = function(x, params=c(0,1),reverse=F)
+{
+  newmean=params[1]
+  newsd=params[2]
+  xbar=ifelse(reverse,0,mean(x, na.rm=T))
+  s=ifelse(reverse,1,sd(x, na.rm=T))
+  scaled_x = (x-xbar)/s*newsd+newmean
+  return(list(x=scaled_x,param_orig=c(xbar,s)))
+}
+
+#function 'RESCALE':
+#   take x=data, params=c(newmin,newmax)
+#   return rescaled_x, c(originalmin,originalmax)
+rescale = function(x, params=c(0,1))
+{
+  newmin=params[1]
+  newmax=params[2]
+  oldmin=min(x, na.rm=T)
+  oldmax=max(x, na.rm=T)
+  scaled_x = (x-oldmin)/(oldmax-oldmin)*(newmax-newmin)+newmin
+  return(list(x=scaled_x,param_orig=c(oldmin,oldmax)))
+}
+```
+
+Rescaling/normalization. 
+- Normalized to mean=0, sd=1: {cgm}
+- Rescaled to min=0, max=1:  {basal, bolus, distance_value}
+```{r}
+#diabetes.res=diabetes.win #from old windowing method
+diabetes.res=diabetes.dif
+orig.pars=list()
+for (feat in usecols)
+{
+  if (feat=='cgm' || feat=='basal')
+    rescaled=normalize(diabetes.res[,feat],c(0,1))
+  else
+    rescaled=rescale(diabetes.res[,feat],c(0,2))
+  rescaled.feat=rescaled$x
+  orig.par=rescaled$param_orig
+  diabetes.res[,feat]=rescaled.feat
+  orig.pars=c(orig.pars,list(orig.par))
+}
+plot(diabetes.res['2019-05-21/2019-05-22'],major.ticks='days',minor.ticks='hours',main=NULL)
+```
+```{r}
+library(corrplot)
+corrs=cor(diabetes.res)
+corrplot(corrs)
+```
+
+Detect NA runs - current sampling method samples from the whole data file, and removes any batches with NA values.
+
+```{r}
+detect_na = function(x)
+{
+  if(any(is.na(x)))
+    return(TRUE)
+  else
+    return(FALSE)
+}
+
+detect_na_inds = function(x)
+{
+  inds=logical(nrow(x))
+  for (i in 1:nrow(x))
+    inds[i]=detect_na(x[i,,])
+  return(inds)
+}
+```
+
+Reshape to [batches, timesteps, features]
+
+```{r}
+timesteps=12*36+48
+n_batches=100
+diabetes.lag = lag(diabetes.res,timesteps:0)
+diabetes.mat.full = as.matrix(diabetes.lag)
+dim(diabetes.mat.full) = c(nrow(diabetes.mat.full),length(usecols),timesteps+1)
+diabetes.mat.full=aperm(diabetes.mat.full,c(1,3,2))
+
+#from old windowing method
+#diabetes.mat=diabetes.mat[seq(from=timesteps+1,to=nrow(diabetes.lag),length.out=1000),,] 
+
+na_inds = which(detect_na_inds(diabetes.mat.full))
+diabetes.mat = diabetes.mat.full[-na_inds,,]
+sample=seq(1,nrow(diabetes.mat),length.out=n_batches)
+diabetes.mat=diabetes.mat[sample,,]
+```
+
+Test-train split
+```{r}
+npred=48
+n=nrow(diabetes.mat)*0.75
+N=nrow(diabetes.mat)
+y_train = diabetes.mat[1:n,(ncol(diabetes.mat)-npred+1):ncol(diabetes.mat),1]
+x_train = diabetes.mat[1:n,1:(ncol(diabetes.mat)-npred),]
+y_test = diabetes.mat[(n+1):N,(ncol(diabetes.mat)-npred+1):ncol(diabetes.mat),1]
+x_test = diabetes.mat[(n+1):N,1:(ncol(diabetes.mat)-npred),]
+```
+
+create matrix of original-scaled y values
+```{r}
+diabetes.lag.nodif = lag(diabetes.xts[,'cgm'],timesteps:0)
+diabetes.mat.nodif = as.matrix(diabetes.lag.nodif)
+diabetes.mat.nodif = diabetes.mat.nodif[-na_inds,] 
+diabetes.mat.nodif = diabetes.mat.nodif[sample,]
+y_test.nodif = diabetes.mat.nodif[(n+1):N,(ncol(diabetes.mat)-npred+1):ncol(diabetes.mat)]
+```
+
+Some parameters
+```{r}
+# specify required arguments
+X_shape2 = dim(x_train)[2]
+X_shape3 = dim(x_train)[3]
+batch_size = 1                # must be a common factor of both the train and test samples
+units = 30
+```
+
+Create LSTM model
+```{r}
+library(keras)
+library(tensorflow)
+model <- keras_model_sequential() 
+model%>%
+  layer_lstm(units, 
+             batch_input_shape = c(batch_size, X_shape2, X_shape3),
+             return_sequences = F, 
+             stateful= TRUE)%>%
+  layer_dense(units = 50) %>%
+  layer_dense(units = npred)
+model
+```
+Compile model 
+```{r}
+model %>% compile(
+  loss = 'mean_absolute_error',
+  optimizer = optimizer_adam( lr= 0.05, decay = 1e-6 ),  
+  metrics = c('mean_squared_error')
+)
+```
+
+Train
+```{r}
+Epochs = 15
+for(i in 1:Epochs ){
+  model %>% fit(x_train, y_train, 
+                epochs=1, 
+                batch_size=batch_size, 
+                verbose=1, 
+                shuffle=FALSE)
+  model %>% reset_states()
+}
+```
+
+
+Predict on test sections
+```{r}
+L = nrow(x_test)/batch_size
+predictions = numeric(nrow(x_test)*npred)
+predictions.raw = numeric(nrow(x_test)*npred)
+dim(predictions)=c(L,npred)
+dim(predictions.raw)=c(L,npred)
+cgm=diabetes.mat.nodif#as.matrix(diabetes.xts[,'cgm'])
+for(i in 1:L){
+     X = x_test[(1+(i-1)*batch_size):(i*batch_size),,]
+     dim(X) = c(batch_size,X_shape2,X_shape3)
+     yhat.raw = model %>% predict(X, batch_size=batch_size)
+     # invert scaling
+     yhat = normalize(yhat.raw, orig.pars[[1]], reverse=T)$x
+     # invert differencing
+     if (usedif) {
+       yhat[1]=yhat[1]+cgm[i,(timesteps-npred-1)]
+       for (j in 2:npred)
+           yhat[j]=yhat[j-1]+yhat[j]
+     }
+     # store
+     predictions[i,] <- yhat
+     predictions.raw[i,] <- yhat.raw
+}
+```
+
+Predict if user took bolus/activity right now (just for fun)
+```{r}
+testbol = mean(diabetes.res$bolus[diabetes.res$bolus>0])*2
+x_test.addbol = x_test
+x_test.addbol[,ncol(x_test.addbol),2] = x_test.addbol[,ncol(x_test.addbol),2] + testbol
+testact = mean(diabetes.res$distance_value[diabetes.res$distance_value>0])
+x_test.addact = x_test
+x_test.addact[,ncol(x_test.addact),4] = x_test.addact[,ncol(x_test.addact),4] + testbol
+
+L = nrow(x_test)/batch_size
+predictions.addbol = numeric(nrow(x_test)*npred)
+predictions.addact = numeric(nrow(x_test)*npred)
+dim(predictions.addbol)=c(L,npred)
+dim(predictions.addact)=c(L,npred)
+for(i in 1:L){
+     X = x_test.addbol[(1+(i-1)*batch_size):(i*batch_size),,]
+     dim(X) = c(batch_size,X_shape2,X_shape3)
+     yhat = model %>% predict(X, batch_size=batch_size)
+     # invert scaling
+     yhat = normalize(yhat, orig.pars[[1]], reverse=T)$x
+     # invert differencing
+     yhat[1]=yhat[1]+cgm[i,(timesteps-npred-1)]
+     for (j in 2:npred)
+       yhat[j]=yhat[j-1]+yhat[j]
+     # store
+     predictions.addbol[i,] <- yhat
+     
+     X = x_test.addact[(1+(i-1)*batch_size):(i*batch_size),,]
+     dim(X) = c(batch_size,X_shape2,X_shape3)
+     yhat = model %>% predict(X, batch_size=batch_size)
+     # invert scaling
+     yhat = normalize(yhat, orig.pars[[1]], reverse=T)$x
+     # invert differencing
+     yhat[1]=yhat[1]+cgm[i,(timesteps-npred-1)]
+     for (j in 2:npred)
+       yhat[j]=yhat[j-1]+yhat[j]
+     # store
+     predictions.addact[i,] <- yhat
+}
+```
+
+Simple plots
+```{r fig.height=6, fig.width=10}
+offset=1
+plotr=3
+plotc=4
+par(mfrow=c(plotr,plotc))
+par('mar'=c(1,1,1,1))
+for (i in 1:(plotr*plotc))
+{
+  ind=offset*plotr*plotc+i
+  #plot(cgm[(n+(i-1)*timesteps):(n+timesteps*i)],type='l')
+  plot(cgm[ind,],type='l',ylim=c(min(3,min(cgm[ind,])),max(15,max(cgm[ind,]))))
+  points(x=(1+timesteps-npred):(timesteps),y=predictions[ind,],col='red', pch=20)
+  
+  # uncomment to plot imaginary bolus/activity predictions
+  # points(x=(1+timesteps-npred):(timesteps),y=predictions.addbol[ind,],col='blue', pch=20)
+  # points(x=(1+timesteps-npred):(timesteps),y=predictions.addact[ind,],col='green', pch=20)
+
+}
+```
+
+Performance metrics - From Annie
+
+```{r}
+getPerformance = function(pred, val) {
+    res = pred - val
+    MAE = sum(abs(res))/length(val)
+    RSS = sum(res^2)
+    MSE = RSS/length(val)
+    RMSE = sqrt(MSE)
+    perf = data.frame(MAE, RSS, MSE, RMSE)
+}
+```
+
+```{r}
+print(getPerformance(predictions.raw,y_test))
+```
+Save the model
+```{r}
+# save_model_hdf5(model, paste("model",timesteps,"denoise.h5",sep='-'))
+```
+
+Code to load a saved model
+```{r}
+# load_model_hdf5('model-288-diff.h5', custom_objects = NULL, compile = TRUE)
+```
+

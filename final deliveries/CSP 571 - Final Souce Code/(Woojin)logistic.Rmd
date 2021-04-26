@@ -1,0 +1,169 @@
+---
+title: "group project"
+author: "woojin choi"
+date: '2020 11 29 '
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+
+```{r pressure, echo=FALSE}
+library(dplyr)
+dia=read.table('C:/Users/woojin/Documents/R studio tries/assignment/5thtest.csv',header=TRUE, sep=',', na.strings='NaN')
+#str(dia)
+dia$lag5m=lag(dia$IMPUTED)
+#5min simple warm up for workout
+dia$lag15m=lag(dia$IMPUTED,3)
+#15min to bolus insulin to take effect
+dia$lag1h=lag(dia$IMPUTED,12)
+#1hr to bolus insulin to peak
+dia[is.na(dia)]=0
+ch5m<-ifelse(dia$IMPUTED>dia$lag5m, 0, 1)
+dia5m=cbind(dia,ch5m)
+dia5=dia5m[-c(1),]
+set.seed(10)
+index <- createDataPartition(dia5$ch5m,p=0.8, list=FALSE)
+dia5tr=dia5[index,]
+dia5t=dia5[-index,]
+
+#dia5tr=dia5[c(0:4000),]
+#dia5t=dia5[-c(0:4000),]
+
+dia5trvif=dia5tr[,c(2,3,4,8)]
+
+
+#library(car)
+
+model2= lm(ch5m~., data=dia5trvif)
+vif(model2)
+
+library(caret)
+model5<-glm(ch5m~BASAL+bolus+Distance_value,data=dia5tr,family=binomial)
+summary(model5)
+model5<-glm(ch5m~bolus,data=dia5tr,family=binomial)
+summary(model5)
+library(ResourceSelection)
+h5<-hoslem.test(dia5tr$ch5m,fitted(model5),g=10)
+h5
+#cbind(h15$expected, h15$observed)
+
+pred5 <- predict(model5, dia5t, type="response")
+pred5a<-ifelse(pred5>=0.5, 1, 0)
+library(e1071)
+confusionMatrix(table(pred5a,dia5t$ch5m))
+library(pROC)
+plot(roc(dia5t$ch5m, pred5))
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+library(dplyr)
+dia=read.table('C:/Users/woojin/Documents/R studio tries/assignment/5thtest.csv',header=TRUE, sep=',', na.strings='NaN')
+#str(dia)
+dia$lag5m=lag(dia$IMPUTED)
+#5min simple warm up for workout
+dia$lag15m=lag(dia$IMPUTED,3)
+#15min to bolus insulin to take effect
+dia$lag1h=lag(dia$IMPUTED,12)
+#1hr to bolus insulin to peak
+dia[is.na(dia)]=0
+
+
+ch15m<-ifelse(dia$IMPUTED>dia$lag15m, 0, 1)
+dia15m=cbind(dia,ch15m)
+dia15=dia15m[-c(3),]
+set.seed(10)
+index <- createDataPartition(dia15$ch15m,p=0.8, list=FALSE)
+dia15tr=dia15[index,]
+dia15t=dia15[-index,]
+
+
+dia15trvif=dia15tr[,c(2,3,4,8)]
+model3= lm(ch15m~., data=dia15trvif)
+
+vif(model3)
+
+
+
+library(caret)
+model15<-glm(ch15m~BASAL+bolus+Distance_value,data=dia15tr,family=binomial)
+summary(model15)
+model15<-glm(ch15m~bolus,data=dia15tr,family=binomial)
+summary(model15)
+library(ResourceSelection)
+h15<-hoslem.test(dia15tr$ch15m,fitted(model5),g=10)
+h15
+#cbind(h15$expected, h15$observed)
+
+pred15 <- predict(model15, dia15t, type="response")
+pred15a<-ifelse(pred15>=0.5, 1, 0)
+library(e1071)
+#cbind
+
+confusionMatrix(table(pred15a,dia15t$ch15m))
+library(pROC)
+plot(roc(dia15t$ch15m, pred15))
+```
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r pressure2, echo=FALSE}
+library(dplyr)
+dia=read.table('C:/Users/woojin/Documents/R studio tries/assignment/5thtest.csv',header=TRUE, sep=',', na.strings='NaN')
+
+dia$lag5m=lag(dia$IMPUTED)
+#5min simple warm up for workout
+dia$lag15m=lag(dia$IMPUTED,3)
+#15min to bolus insulin to take effect
+dia$lag1h=lag(dia$IMPUTED,12)
+#1hr to bolus insulin to peak
+dia[is.na(dia)]=0
+
+
+ch1h<-ifelse(dia$IMPUTED>dia$lag1h, 0, 1)
+dia1h=cbind(dia,ch1h)
+dia1ho=dia1h[-c(12),]
+
+
+set.seed(10)
+index <- createDataPartition(dia1ho$ch1h,p=0.8, list=FALSE)
+dia1hotr=dia1ho[index,]
+dia1hot=dia1ho[-index,]
+
+
+dia1hotrvif=dia1hotr[,c(2,3,4,8)]
+
+model4= lm(ch1h~., data=dia1hotrvif)
+vif(model4)
+
+
+
+library(caret)
+model1h<-glm(ch1h~BASAL+bolus+Distance_value,data=dia1hotr,family=binomial)
+summary(model1h)
+model1h<-glm(ch1h~BASAL+bolus,data=dia1hotr,family=binomial)
+summary(model1h)
+library(ResourceSelection)
+h1h<-hoslem.test(dia1hotr$ch1h,fitted(model5),g=10)
+h1h
+
+pred1h <- predict(model1h, dia1hot, type="response")
+pred1ha<-ifelse(pred1h>=0.5, 1, 0)
+library(e1071)
+confusionMatrix(table(pred1ha,dia1hot$ch1h))
+library(pROC)
+plot(roc(dia1hot$ch1h, pred1h))
+dia1hot$changeinCGM<-pred1ha
+
+
+#library(ggplot2)
+#dia1hot$timeorder=seq(nrow(dia1hot),1)
+#ggplot(data=dia1hot)+geom_line(aes(x=timeorder, y=changeinCGM), color="red")+geom_line(aes(x=timeorder, y=ch1h),linetype="dotted", color="blue")
+```

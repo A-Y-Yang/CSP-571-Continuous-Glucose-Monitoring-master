@@ -1,0 +1,164 @@
+---
+title: "CGM data ARIMA"
+author: "Annie Yang"
+date: "9/30/2020"
+output: 
+  html_notebook:
+    toc: yes
+    toc_float: yes
+---
+
+`Load` the data set (*.csv file) & Extract the `IMPUTED` column.
+```{r}
+df <-  read.csv("D:/IIT-master/CS-571-Data Preparation & Analysis-master/project/diabetes_ds/sample_dat.csv", sep=",", header=T, stringsAsFactors = T)
+
+imputed.bg.lvl<- df$IMPUTED
+bg.dat <- data.frame(imputed.bg.lvl)
+
+#View(diabetes.df)
+```
+
+Creat the time object
+```{r}
+date <- paste0(df$YEAR,'-',df$MONTH,'-',df$DAY)
+time <- paste0(df$HOUR,':',df$MIN,':',df$SEC)
+
+bg.dat$time <- as.POSIXct(paste(date, time), format="%Y-%m-%d %H:%M:%S")
+bg.dat <- bg.dat[colnames(bg.dat)[c(2, 1)]]
+tail(bg.dat)
+```
+
+Check the number of mssing values (per month)
+```{r}
+ts.Feb = subset(bg.dat, time >= as.POSIXct("2019-02-01 00:00") & time < as.POSIXct("2019-03-01 00:00"))
+paste0('Feb : ',sum(is.na(ts.Feb)))
+
+ts.Mar = subset(bg.dat, time >= as.POSIXct("2019-03-01 00:00") & time < as.POSIXct("2019-04-01 00:00"))
+paste0('Mar : ',sum(is.na(ts.Mar)))
+
+ts.Aprl = subset(bg.dat, time >= as.POSIXct("2019-04-01 00:00") & time < as.POSIXct("2019-05-01 00:00"))
+paste0('Apl : ',sum(is.na(ts.Aprl)))
+
+ts.May = subset(bg.dat, time >= as.POSIXct("2019-05-05 00:00") & time < as.POSIXct("2019-06-01 00:00"))
+paste0('May : ',sum(is.na(ts.May)))
+
+ts.June = subset(bg.dat, time >= as.POSIXct("2019-06-01 00:00") & time < as.POSIXct("2019-07-01 00:00"))
+paste0('Jun : ',sum(is.na(ts.June)))
+
+ts.July = subset(bg.dat, time >= as.POSIXct("2019-07-01 00:00") & time < as.POSIXct("2019-08-01 00:00"))
+paste0('Jul : ',sum(is.na(ts.July)))
+
+ts.July = subset(bg.dat, time >= as.POSIXct("2019-08-01 00:00") & time < as.POSIXct("2019-09-01 00:00"))
+paste0('Aug : ',sum(is.na(ts.July)))
+```
+
+Select a period of time as the time series (24 hrs)
+```{r}
+sub.dat = subset(bg.dat, time >= as.POSIXct("2019-8-01 00:00") & time < as.POSIXct("2019-08-08 01:00"))
+#head(ts, n=5)
+#length(ts)
+dim(sub.dat)
+```
+
+Raw data plot
+```{r, warning=FALSE, fig.width=10, fig.height=5}
+library(ggplot2)
+
+ggplot(sub.dat, aes(x=time, y=imputed.bg.lvl)) +
+  geom_line() + 
+  xlab("")+
+  ylab("BG level")
+```
+
+Decomposing plots
+```
+tscomponents_add <- decompose(ts, type = "additive")
+tscomponents_mul <- decompose(ts, type = "multiplicative")
+plot(tscomponents_add, col = "red")
+plot(tscomponents_mul, col = "red")
+```
+
+
+```{r}
+ts <- ts(sub.dat$imputed.bg.lvl)
+
+options(warn=-1)
+library(tseries)
+
+adf.test(ts)
+```
+
+Split into training/test set (80/20) & Plot
+```{r, fig.width=10, fig.height=5}
+library(forecast)
+#train.idx <- sample(1:nrow(sub.dat), size=0.8*nrow(sub.dat))
+
+
+#dat.train <- sub.dat[train.idx, ]
+#dat.test <- sub.dat[-train.idx, ]
+
+ts.train <- head(ts, round(length(ts) * 0.8))
+h <- length(ts) - length(ts.train)
+ts.test <- tail(ts, h)
+length(ts)
+length(ts.train)
+length(ts.test)
+
+#plotting the data
+autoplot(ts.train, size = 2) + autolayer(ts.test, size = 2)
+```
+
+ACF/PACF
+```{r}
+pacf(diff(ts.train, lag=2), lag=20)
+acf(diff(ts.train, lag=2), lag=20)
+```
+
+Apply auto.arima() function
+```{r, warning=FALSE}
+library(forecast)
+model = auto.arima(ts.train)
+model
+```
+
+Forcast
+```{r, fig.width=10, fig.height=5}
+#plot(forecast(model,length(ts.test)))
+bg.preds <- forecast(model, level = c(95), length(ts.test))
+#print(bg.preds$fitted)
+#autoplot(bg.preds, size=1.1, predict.size = 1.1, predict.colour = 'red')
+#rbind(ts.train, bg.preds)
+#lines(ts,col="blue")
+```
+
+```{r}
+length(bg.preds$fitted)
+```
+
+```{r, warning=FALSE, fig.width=10, fig.height=5}
+library(ggfortify)
+res <- rbind(ts, bg.preds$fitted)
+autoplot(bg.preds, predict.colour = 'red1', ts.colour = 'gray23',predict.linetype = 'dashed', size=1, predict.size = 1.1) 
+```
+
+
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

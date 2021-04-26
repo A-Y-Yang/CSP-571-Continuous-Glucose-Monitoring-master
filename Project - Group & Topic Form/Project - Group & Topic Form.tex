@@ -1,0 +1,82 @@
+\documentclass{article}
+\usepackage{CJK}
+\usepackage{lipsum}     %随机生成文本的宏包
+\usepackage{geometry}   %设置页边距的宏包
+\usepackage{titlesec}   %设置页眉页脚的宏包
+\geometry{left=2cm,right=2cm,top=1.6cm,bottom=1.6cm}  %设置 上、左、下、右 页边距
+\usepackage{indentfirst}  
+
+\usepackage{setspace}
+\renewcommand{\baselinestretch}{1.25}
+
+\usepackage{xcolor}
+
+\usepackage[utf8]{inputenc}
+\usepackage{tabularx,multirow}
+\usepackage{listings}
+\usepackage[english]{babel}
+\usepackage{graphicx}
+\usepackage{blindtext}
+\usepackage{enumitem}
+
+\usepackage{array,booktabs,arydshln,xcolor}
+\usepackage{colortbl}
+\definecolor{mygray}{gray}{0.6}
+%\newcommand\VRule[1][\arrayrulewidth]{\vrule width #1}
+
+\usepackage{fancyhdr}
+
+%\pagestyle{fancy}
+%\fancyfoot[c]{\thepage}
+
+%\fancyhead[r]{CSP-554 Yin-Yang A20450316 hw3}
+
+\begin{document}
+	
+{\centering
+	{
+		\textbf{\Huge{CSP 571 Data Preparation and Analysis}}
+		~\\
+		~\\
+		\huge{\textbf{Project Group \& Topic Form}}  \par
+}}
+
+\centerline{\rule{19cm}{0.4pt}} 
+~\\
+
+\noindent{\textbf{{\LARGE 1. Project Group}}}\\
+~\\
+%\setlength\arrayrulewidth{5pt}
+\begin{tabular}{l !{\color{white} \vrule width 1pt } l|l|l}
+			{\color{red}{\LARGE $\star$}} & {\large Emily Tao} & {etao@hawk.iit.edu}\\
+			& {\large Geogu Park} & {wchoi6@hawk.iit.edu}\\
+			& {\large Jim Witkiewicz} & {jwitkiew@hawk.iit.edu}\\
+			& {\large Woojin Choi} & {gpark7@hawk.iit.edu}\\
+			& {\large Yin Yang} & {yyang191@hawk.iit.edu}
+	%Column 1 & Column 2 & column3 %\\\specialrule{3pt}{0pt}{0pt}
+	%second row & & \\\hdashline
+	%third row  & & \\\specialrule{4pt}{0pt}{0pt}
+\end{tabular}\\
+~\\
+~\\
+\noindent{\textbf{{\LARGE 2. Project Topic}}}\\
+
+\textbf{{\Large  1.1 Application subject area}}\\
+
+{\large Disbetes}\\
+
+\textbf{{\Large  1.2 Specific data set and sources}}\\
+
+$\bullet${ Tidepool diabetes data. This is not a public data set, but will be used with permission from the Cinar Lab at IIT and the Tidepool Project. It is a time series data set containing continuous blood glucose measurements and other variables from blood glucose monitor users who are Type 1 diabetic.}
+
+Pima Indians Diabetes Dataset : {\color{blue}\underline{https://www.kaggle.com/jamaltariqcheema/pima-indians-diabetes-dataset}}\\
+
+\textbf{{\Large  1.3 Reference resources}}\\
+
+DDD\\
+
+\textbf{{\Large  1.4 Supplemental resources}}\\
+
+EEE\\
+
+\end{document}

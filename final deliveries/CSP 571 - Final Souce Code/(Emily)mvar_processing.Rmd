@@ -1,0 +1,178 @@
+---
+title: "Multivariate processing and exploration"
+output: html_notebook
+author: Emily Tao
+---
+
+Loading Data
+
+```{r}
+df=read.table('E:/Documents/iit-coursework/csp-571/S_SET03_CASE005_M2_P2.csv',
+               header=TRUE, sep=',', na.strings='NaN')
+cgm_string='imputed' #set imputed/denoised as CGM value
+if (cgm_string=='imputed') { 
+  cgm=df$IMPUTED
+} else { 
+  cgm=df$Denoised
+}
+```
+
+Converting time information to timestamp objects (from Annie)
+
+```{r}
+db.date <- paste0(df$YEAR,'-',df$MONTH,'-',df$DAY)
+db.time <- paste0(df$HOUR,':',df$MIN,':',df$SEC)
+date_time <- as.POSIXct(paste(db.date, db.time), format="%Y-%m-%d %H:%M:%S")
+```
+
+Assembling the cleaned data frame
+
+```{r}
+diabetes.df <- data.frame(date_time,cgm)
+```
+
+Function to fill NA values with the previous value (or next value, if there is no previous value as in the start of the data file)
+```{r}
+fill.withprev = function(x)
+{
+    first.ind = which(!is.na(x))[1]
+    prev=x[first.ind]
+    for (i in 1:length(x))
+    {
+      if(is.na(x[i]))
+        x[i]=prev
+      else
+        prev=x[i]
+    }
+    return(x)
+}
+  
+```
+
+Handling NA values in sparse variables
+
+```{r}
+bolus=df$bolus
+bolus[is.na(bolus)]=0
+
+basal=df$BASAL
+
+library(mltools)
+library(data.table)
+activity_names=df$Activity_Name
+activity_names[is.na(activity_names)]=0
+activity_names=factor(activity_names)
+activity_oneh <- one_hot(as.data.table(activity_names)) 
+
+distance_value=df$Distance_value
+distance_value[is.na(distance_value)]=0
+
+activity_duration=df$Activity_Duration
+activity_duration[is.na(activity_duration)]=0
+
+insulin_onboard=fill.withprev(df$insulinOnBoard)
+
+insulin_sensitivity=fill.withprev(df$insulinSensitivity)
+
+smbg_new=df$smbg_new
+smbg_new[is.na(smbg_new)]=0
+
+carb_input_new=df$carb_input_new
+carb_input_new[is.na(carb_input_new)]=0
+```
+
+Adding sparse variables to the dataframe
+
+```{r}
+diabetes.df$bolus=bolus
+diabetes.df$basal=basal
+diabetes.df$distance_value=distance_value
+diabetes.df$activity_duration=activity_duration
+diabetes.df=cbind(diabetes.df,activity_oneh)
+diabetes.df$insulin_onboard=insulin_onboard
+diabetes.df$insulin_sensitivity=insulin_sensitivity
+diabetes.df$smbg_new=smbg_new
+diabetes.df$carb_input_new=carb_input_new
+```
+
+## Data Exploration
+
+Set the time window
+
+```{r}
+#Set the time window
+start_time = as.POSIXct("2019-05-01 00:00")
+end_time = as.POSIXct("2019-05-03 00:00")
+window = which(diabetes.df$date_time >= start_time & diabetes.df$date_time < end_time)
+```
+
+Plot some features overlaid on one plot
+
+```{r fig.height=6, fig.width=12}
+#Draw the plot
+plot(diabetes.df$cgm[window],type='l',main='First 48 hours of IMPUTED cgm values',ylim=c(0,16))
+lines(diabetes.df$basal[window],col='green')
+lines(diabetes.df$bolus,col='blue')
+lines(diabetes.df$distance_value,col='red')
+lines(diabetes.df$activity_names_1,col='purple')
+ad_norm = diabetes.df$activity_duration/max(diabetes.df$activity_duration)
+lines(ad_norm*15,col='orange')
+legend('topright',inset=0.01, legend=c('CGM','basal insulin','bolus insulin','distance traveled','activity duration','activity name'),col=c('black','green','blue','red','orange','purple'), lty=1)
+```
+
+Plot everything in their own window
+
+```{r fig.height=6, fig.width=10}
+#Draw the plot
+par(mfcol=c(5,2))
+par('mar'=c(2,2,2,2))
+colors = rainbow(9)
+names = colnames(diabetes.df)[c(3:6,8,11:14)]
+plot(diabetes.df$cgm[window],type='l',lwd=2,main='First 48 hours of IMPUTED cgm values',ylim=c(0,16))
+legend('topright',inset=0.01, legend=c('cgm'),col=c('black'),lty=1)
+plot(diabetes.df$bolus[window],type='l',lwd=2,col=colors[1])
+legend('topright',inset=0.01, legend=c(names[1]),col=colors[1],lty=1)
+plot(diabetes.df$basal[window],type='l',lwd=2,col=colors[2])
+legend('topright',inset=0.01, legend=c(names[2]),col=colors[2],lty=1)
+plot(diabetes.df$distance_value[window],type='l',lwd=2,col=colors[3])
+legend('topright',inset=0.01, legend=c(names[3]),col=colors[3],lty=1)
+plot(diabetes.df$activity_duration[window],type='l',lwd=2,col=colors[4])
+legend('topright',inset=0.01, legend=c(names[4]),col=colors[4],lty=1)
+plot(diabetes.df$activity_names_1[window],type='l',lwd=2,col=colors[5])
+legend('topright',inset=0.01, legend=c(names[5]),col=colors[5],lty=1)
+plot(diabetes.df$insulin_onboard[window],type='l',lwd=2,col=colors[6])
+legend('topright',inset=0.01, legend=c(names[6]),col=colors[6],lty=1)
+plot(diabetes.df$insulin_sensitivity[window],type='l',lwd=2,col=colors[7])
+legend('topright',inset=0.01, legend=c(names[7]),col=colors[7],lty=1)
+plot(diabetes.df$smbg_new[window],type='l',lwd=2,col=colors[8])
+legend('topright',inset=0.01, legend=c(names[8]),col=colors[8],lty=1)
+plot(diabetes.df$carb_input_new[window],type='l',lwd=2,col=colors[9])
+legend('topright',inset=0.01, legend=c(names[9]),col=colors[9],lty=1)
+```
+
+Plot correlations between features.
+
+```{r}
+library(corrplot)
+remna.ind=which(!is.na(diabetes.df$cgm))
+corrs=cor(diabetes.df[remna.ind,2:ncol(diabetes.df)])
+corrplot(corrs)
+```
+
+Assessing where are the missing CGM sections
+
+```{r}
+nainds=which(is.na(diabetes.df$cgm))
+starts_lagged=which(diff(nainds)>1)
+starts=c(nainds[1],nainds[starts_lagged+1])
+ends=c(nainds[starts_lagged],nainds[length(nainds)])
+naseq=matrix(c(starts,ends),nrow=length(starts))
+sprintf('The NA start and end points are: ')
+naseq
+diabetes.df$date_time[naseq]
+```
+save the data frame
+```{r}
+save(diabetes.df,file=paste0("diabetes_mvar_",cgm_string,".Rda"))
+```
+

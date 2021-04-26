@@ -1,0 +1,92 @@
+---
+title: "Multivariate processing and exploration"
+output: html_notebook
+author: Emily Tao
+---
+
+Loading Data
+
+```{r}
+df=read.table('D:/IIT-master/CS-571-Data Preparation & Analysis-master/project/diabetes_ds/sample_dat.csv',
+               header=TRUE, sep=',', na.strings='NaN')
+cgm=df$IMPUTED
+```
+
+Converting time information to timestamp objects (from Annie)
+
+```{r}
+db.date <- paste0(df$YEAR,'-',df$MONTH,'-',df$DAY)
+db.time <- paste0(df$HOUR,':',df$MIN,':',df$SEC)
+date_time <- as.POSIXct(paste(db.date, db.time), format="%Y-%m-%d %H:%M:%S")
+```
+
+Assembling the cleaned data frame
+
+```{r}
+diabetes.df <- data.frame(date_time,cgm)
+```
+
+Handling NA values in sparse variables
+
+```{r}
+bolus=df$bolus
+bolus[is.na(bolus)]=0
+
+basal=df$BASAL
+
+library(mltools)
+library(data.table)
+activity_names=df$Activity_Name
+activity_names[is.na(activity_names)]=0
+activity_names=factor(activity_names)
+activity_oneh <- one_hot(as.data.table(activity_names)) 
+
+distance_value=df$Distance_value
+distance_value[is.na(distance_value)]=0
+
+activity_duration=df$Activity_Duration
+activity_duration[is.na(activity_duration)]=0
+```
+
+Adding sparse variables to the dataframe
+
+```{r}
+diabetes.df$bolus=bolus
+diabetes.df$basal=basal
+diabetes.df$distance_value=distance_value
+diabetes.df$activity_duration=activity_duration
+diabetes.df=cbind(diabetes.df,activity_oneh)
+```
+
+## Data Exploration
+
+Plot features across time
+
+```{r}
+#Set the time window
+start_time = as.POSIXct("2019-05-01 00:00")
+end_time = as.POSIXct("2019-05-03 00:00")
+window = which(diabetes.df$date_time >= start_time & diabetes.df$date_time < end_time)
+```
+
+```{r}
+#Draw the plot
+plot(diabetes.df$cgm[window],type='l',main='First 24 hours of IMPUTED cgm values',ylim=c(0,16))
+lines(diabetes.df$basal[window],col='green')
+lines(diabetes.df$bolus,col='blue')
+lines(diabetes.df$distance_value,col='red')
+lines(diabetes.df$activity_names_1,col='purple')
+ad_norm = diabetes.df$activity_duration/max(diabetes.df$activity_duration)
+lines(ad_norm*15,col='orange')
+legend('topright',inset=0.05, legend=c('CGM','basal insulin','bolus insulin','distance traveled','activity duration','activity name'),col=c('black','green','blue','red','orange','purple'), lty=1)
+```
+
+Plot correlations between features.
+
+```{r}
+library(corrplot)
+remna.ind=which(!is.na(diabetes.df$cgm))
+corrs=cor(diabetes.df[remna.ind,2:10])
+corrplot(corrs)
+```
+
